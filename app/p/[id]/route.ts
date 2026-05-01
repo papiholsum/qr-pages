@@ -155,27 +155,73 @@ function buildSyncScript(opts: SyncOpts): string {
       realtime: { params: { eventsPerSecond: 10 } },
     });
 
-    var checkboxes = Array.prototype.slice.call(
-      document.querySelectorAll('input[type="checkbox"]')
-    );
-    if (checkboxes.length === 0) return;
+    // Collect "toggleable items" the page contains. Two patterns supported:
+    //   (a) native checkboxes:  <input type="checkbox">
+    //   (b) custom click-to-toggle: any element whose inline onclick calls
+    //       a function with /toggle|check/i in its name, OR which itself
+    //       carries a class indicating checkable state. The most common
+    //       custom pattern looks like:
+    //         <li onclick="toggle(this)" class="checked">…</li>
+    //       so we hunt for [onclick*="toggle"] / [onclick*="check"].
+    var seen = new Set();
+    function add(el) { if (el && !seen.has(el)) { seen.add(el); items.push(el); } }
+    var items = [];
+    document.querySelectorAll('input[type="checkbox"]').forEach(add);
+    document.querySelectorAll('[onclick*="toggle"]').forEach(add);
+    document.querySelectorAll('[onclick*="check"]').forEach(add);
+    document.querySelectorAll('[role="checkbox"]').forEach(add);
+    if (items.length === 0) return;
+
+    function isNative(el) {
+      return el.tagName === 'INPUT' && el.type === 'checkbox';
+    }
+    function isChecked(el) {
+      if (isNative(el)) return !!el.checked;
+      return el.classList.contains('checked');
+    }
+    function setLocally(el, value) {
+      // Apply state without re-firing user code (used during init).
+      if (isNative(el)) {
+        el.checked = value;
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+        el.dispatchEvent(new Event('input',  { bubbles: true }));
+      } else {
+        if (isChecked(el) !== value) {
+          // For custom items, the inline onclick handler is what actually
+          // toggles the .checked class AND updates progress counters etc.
+          // Synthesize a click so the page's own logic runs.
+          el.click();
+        }
+      }
+    }
 
     // Guard so realtime-applied changes don't re-write to the DB and loop.
     var applying = false;
 
-    function fire(el) {
-      // Trigger any progress / counter listeners the user's own JS attached.
-      el.dispatchEvent(new Event('change', { bubbles: true }));
-      el.dispatchEvent(new Event('input',  { bubbles: true }));
+    function applyState(idx, checked) {
+      var el = items[idx];
+      if (!el || isChecked(el) === checked) return;
+      applying = true;
+      setLocally(el, checked);
+      applying = false;
     }
 
-    function applyState(idx, checked) {
-      var el = checkboxes[idx];
-      if (!el || el.checked === checked) return;
-      applying = true;
-      el.checked = checked;
-      fire(el);
-      applying = false;
+    function persist(i, checked) {
+      if (applying) return;
+      client
+        .from('page_state')
+        .upsert(
+          {
+            page_id:    PAGE_ID,
+            item_index: i,
+            checked:    checked,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'page_id,item_index' }
+        )
+        .then(function (res) {
+          if (res.error) console.warn('[qr-pages] state write failed', res.error);
+        });
     }
 
     // 1. Initial fetch — paint the page with whatever state already exists.
@@ -194,26 +240,17 @@ function buildSyncScript(opts: SyncOpts): string {
       });
 
     // 2. On any local toggle, upsert to the DB.
-    checkboxes.forEach(function (cb, i) {
-      cb.addEventListener('change', function () {
-        if (applying) return;
-        client
-          .from('page_state')
-          .upsert(
-            {
-              page_id:    PAGE_ID,
-              item_index: i,
-              checked:    cb.checked,
-              updated_at: new Date().toISOString(),
-            },
-            { onConflict: 'page_id,item_index' }
-          )
-          .then(function (res) {
-            if (res.error) {
-              console.warn('[qr-pages] state write failed', res.error);
-            }
-          });
-      });
+    items.forEach(function (el, i) {
+      if (isNative(el)) {
+        el.addEventListener('change', function () { persist(i, !!el.checked); });
+      } else {
+        // Inline onclick handlers run BEFORE addEventListener listeners,
+        // so by the time we read isChecked() the class has been flipped.
+        el.addEventListener('click', function () {
+          // Defer one tick in case the page's toggle() runs async work first.
+          setTimeout(function () { persist(i, isChecked(el)); }, 0);
+        });
+      }
     });
 
     // 3. Subscribe to live updates from other devices/people.

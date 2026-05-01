@@ -127,14 +127,27 @@ function buildSyncScript(opts: SyncOpts): string {
 
   function loadSDK(cb) {
     if (window.supabase && window.supabase.createClient) return cb();
-    var s = document.createElement('script');
-    s.src = 'https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.min.js';
-    s.crossOrigin = 'anonymous';
-    s.onload  = cb;
-    s.onerror = function () {
-      console.warn('[qr-pages] Failed to load supabase-js; live sync disabled.');
-    };
-    document.head.appendChild(s);
+    // Try jsdelivr first (more reliable CORS); fall back to unpkg.
+    var sources = [
+      'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js',
+      'https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js',
+    ];
+    function tryNext(i) {
+      if (i >= sources.length) {
+        console.warn('[qr-pages] Failed to load supabase-js from any CDN; live sync disabled.');
+        return;
+      }
+      var s = document.createElement('script');
+      s.src     = sources[i];
+      s.async   = true;
+      s.onload  = function () {
+        if (window.supabase && window.supabase.createClient) cb();
+        else tryNext(i + 1);
+      };
+      s.onerror = function () { tryNext(i + 1); };
+      document.head.appendChild(s);
+    }
+    tryNext(0);
   }
 
   function start() {

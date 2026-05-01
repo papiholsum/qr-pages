@@ -5,6 +5,7 @@ import Link from "next/link";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { Nav } from "@/components/nav";
 import { PageCard } from "@/components/page-card";
+import { DashboardDropZone } from "@/components/dashboard-dropzone";
 import { type Page } from "@/lib/types";
 
 export default async function DashboardPage() {
@@ -21,14 +22,18 @@ export default async function DashboardPage() {
     <div>
       <Nav email={userData.user.email} />
 
+      {/* Window-level drag-and-drop overlay. Drops anywhere on the page
+          upload to Supabase + refresh the list. */}
+      <DashboardDropZone userId={userData.user.id} />
+
       <main className="mx-auto max-w-6xl px-6 py-8">
         <div className="mb-6 flex items-end justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Your pages</h1>
             <p className="mt-1 text-sm text-ink-600 dark:text-ink-400">
               {pages?.length
-                ? `${pages.length} hosted page${pages.length === 1 ? "" : "s"}.`
-                : "Drop your first HTML to get a public URL + QR code."}
+                ? `${pages.length} hosted page${pages.length === 1 ? "" : "s"} — drop more anywhere on this page to add.`
+                : "Drag an HTML file anywhere on this page, or click Upload."}
             </p>
           </div>
           <Link
@@ -67,7 +72,7 @@ function EmptyState() {
       </div>
       <h2 className="text-lg font-semibold">No pages yet</h2>
       <p className="mx-auto mt-1 max-w-md text-sm text-ink-600 dark:text-ink-400">
-        Drop an HTML file in to upload it. Each one gets a public URL and a QR code, and shows up here.
+        Drag an HTML file anywhere on this page, or click the button below. Each one gets a public URL and a QR code, and shows up here.
       </p>
       <Link
         href="/upload"

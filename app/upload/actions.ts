@@ -7,6 +7,7 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 
 export type UploadState = { error?: string } | undefined;
@@ -48,9 +49,14 @@ export async function uploadPage(_prev: UploadState, formData: FormData): Promis
     });
   if (upErr) return { error: `Upload failed: ${upErr.message}` };
 
-  // Public URL — bucket is public so this works without a signed URL.
-  const { data: pub } = supabase.storage.from("pages").getPublicUrl(storagePath);
-  const publicUrl = pub.publicUrl;
+  // Public URL — points at our /p/[id] proxy route, which re-emits the
+  // file as text/html (Supabase's raw public bucket serves text/plain
+  // with a sandboxed CSP, which prevents the page from rendering).
+  const h        = headers();
+  const proto    = h.get("x-forwarded-proto") || "https";
+  const host     = h.get("host") || "localhost:3000";
+  const siteUrl  = `${proto}://${host}`;
+  const publicUrl = `${siteUrl}/p/${pageId}`;
 
   // Pretty-default the display name from the filename if the user left
   // the name field blank.

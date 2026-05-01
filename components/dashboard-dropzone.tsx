@@ -54,8 +54,10 @@ export function DashboardDropZone({ userId }: DashboardDropZoneProps) {
         });
       if (upErr) throw new Error(`Storage upload failed: ${upErr.message}`);
 
-      const { data: pub } = supabase.storage.from("pages").getPublicUrl(storagePath);
-      const publicUrl = pub.publicUrl;
+      // Use our /p/[id] proxy route, not the raw Supabase Storage URL.
+      // Supabase's public bucket serves objects as text/plain with a
+      // sandboxed CSP, which would prevent the page from rendering.
+      const publicUrl = `${window.location.origin}/p/${pageId}`;
 
       const fallbackName = file.name
         .replace(/\.(html?|htm)$/i, "")
